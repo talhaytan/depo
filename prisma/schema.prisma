@@ -1,0 +1,197 @@
+// Prisma Schema for DEPO — Inventory & Warehouse Management Web Application
+// Supports local operational database (SQLite default for out-of-the-box zero-config execution)
+// and production PostgreSQL (see prisma/schema.postgresql.prisma for production deployment).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("EMPLOYEE") // "ADMIN" | "EMPLOYEE"
+  isActive     Boolean  @default(true)
+
+  // Granular Employee Permissions
+  canManageProducts    Boolean @default(false)
+  canManageCategories  Boolean @default(false)
+  canManageSuppliers   Boolean @default(false)
+  canStockIn           Boolean @default(true)
+  canStockOut          Boolean @default(true)
+  canAdjustStock       Boolean @default(false)
+  canViewReports       Boolean @default(false)
+  canExportData        Boolean @default(false)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  movements    StockMovement[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+
+  @@index([email])
+  @@index([role, isActive])
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isArchived  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  products    Product[]
+
+  @@index([name])
+  @@index([isArchived])
+}
+
+model Supplier {
+  id            String    @id @default(cuid())
+  companyName   String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  notes         String?
+  isArchived    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  products      Product[]
+  movements     StockMovement[]
+
+  @@index([companyName])
+  @@index([isArchived])
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  sku             String   @unique
+  barcode         String?  @unique
+  description     String?
+  imageUrl        String?
+  quantity        Decimal  @default(0)
+  unit            String   @default("Adet") // Adet, Kutu, Paket, Kg, Gram, Litre, Metre, etc.
+  minStockLevel   Decimal  @default(5)
+  unitCost        Decimal  @default(0)
+  locationCode    String?  @default("ANA-DEPO") // Extensible for future multi-warehouse locations
+  isArchived      Boolean  @default(false)
+
+  categoryId      String
+  category        Category @relation(fields: [categoryId], references: [id])
+
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  movements       StockMovement[]
+  notifications   Notification[]
+
+  @@index([sku])
+  @@index([barcode])
+  @@index([categoryId])
+  @@index([supplierId])
+  @@index([isArchived])
+  @@index([name])
+}
+
+model StockMovement {
+  id             String   @id @default(cuid())
+  movementCode   String   @unique // Human-readable e.g. MOV-20261026-0001
+  idempotencyKey String?  @unique
+
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id])
+
+  type           String   // "IN" | "OUT" | "ADJUSTMENT" | "REVERSAL"
+  quantity       Decimal  // Always positive magnitude of change (or delta for adjustment)
+  stockBefore    Decimal
+  stockAfter     Decimal
+  unitCost       Decimal? // Recorded purchase cost at time of movement
+
+  reason         String?  // Satış, Üretimde kullanım, Hasar, İade dışı kayıp, Diğer, Sayım Fazlası, Sayım Eksiği, İptal/Ters Kayıt, etc.
+  referenceNo    String?  // Invoice or document reference
+  notes          String?
+  movementDate   DateTime @default(now())
+
+  supplierId     String?
+  supplier       Supplier? @relation(fields: [supplierId], references: [id])
+
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+
+  reversedMovementId String? // If this movement is a reversal of an earlier movement, or if it was reversed
+  isReversed         Boolean @default(false)
+
+  createdAt      DateTime @default(now())
+
+  @@index([productId, createdAt])
+  @@index([type, createdAt])
+  @@index([userId])
+  @@index([movementDate])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  type        String   // "OUT_OF_STOCK" | "LOW_STOCK" | "SYSTEM"
+  title       String
+  message     String
+  severity    String   @default("WARNING") // "INFO" | "WARNING" | "CRITICAL"
+  isRead      Boolean  @default(false)
+  stateKey    String?  // Deduplication key e.g. "PRODUCT_STOCK_STATE:<productId>:<status>"
+
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id])
+
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([isRead, createdAt])
+  @@index([productId])
+  @@index([stateKey])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // e.g. "PRODUCT_CREATE", "STOCK_IN", "STOCK_OUT", "STOCK_ADJUST", "USER_UPDATE", "SETTINGS_UPDATE"
+  entityType  String   // "Product", "StockMovement", "User", "Category", "Supplier", "Settings"
+  entityId    String?
+  summary     String
+  metadata    String?  // JSON string of safe before/after details (never secrets/passwords)
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  id                   String   @id @default("default")
+  companyName          String   @default("DEPO Stok ve Antrepo Yönetimi")
+  currency             String   @default("TRY")
+  currencySymbol       String   @default("₺")
+  timezone             String   @default("Europe/Istanbul")
+  lowStockAlertEnabled Boolean  @default(true)
+  customUnits          String   @default("Adet,Kutu,Paket,Kg,Gram,Litre,Metre,Koli,Palet")
+  defaultLocation      String   @default("ANA-DEPO")
+  valuationMethod      String   @default("STANDARD_COST") // Current Quantity * Recorded Unit Cost
+  updatedAt            DateTime @updatedAt
+}

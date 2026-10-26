@@ -1,0 +1,198 @@
+// Production PostgreSQL Prisma Schema for DEPO
+// To switch to PostgreSQL in production:
+// 1. Copy this file over prisma/schema.prisma (or change provider to "postgresql")
+// 2. Set DATABASE_URL="postgresql://user:password@localhost:5432/depo?schema=public" in .env
+// 3. Run: npx prisma migrate deploy
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   @default("EMPLOYEE")
+  isActive     Boolean  @default(true)
+
+  canManageProducts    Boolean @default(false)
+  canManageCategories  Boolean @default(false)
+  canManageSuppliers   Boolean @default(false)
+  canStockIn           Boolean @default(true)
+  canStockOut          Boolean @default(true)
+  canAdjustStock       Boolean @default(false)
+  canViewReports       Boolean @default(false)
+  canExportData        Boolean @default(false)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  movements     StockMovement[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@index([email])
+  @@index([role, isActive])
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  isArchived  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  products    Product[]
+
+  @@index([name])
+  @@index([isArchived])
+}
+
+model Supplier {
+  id            String    @id @default(cuid())
+  companyName   String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  notes         String?
+  isArchived    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  products      Product[]
+  movements     StockMovement[]
+
+  @@index([companyName])
+  @@index([isArchived])
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  sku             String   @unique
+  barcode         String?  @unique
+  description     String?
+  imageUrl        String?
+  quantity        Decimal  @default(0) @db.Decimal(14, 3)
+  unit            String   @default("Adet")
+  minStockLevel   Decimal  @default(5) @db.Decimal(14, 3)
+  unitCost        Decimal  @default(0) @db.Decimal(14, 2)
+  locationCode    String?  @default("ANA-DEPO")
+  isArchived      Boolean  @default(false)
+
+  categoryId      String
+  category        Category @relation(fields: [categoryId], references: [id])
+
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  movements       StockMovement[]
+  notifications   Notification[]
+
+  @@index([sku])
+  @@index([barcode])
+  @@index([categoryId])
+  @@index([supplierId])
+  @@index([isArchived])
+  @@index([name])
+}
+
+model StockMovement {
+  id                 String   @id @default(cuid())
+  movementCode       String   @unique
+  idempotencyKey     String?  @unique
+
+  productId          String
+  product            Product  @relation(fields: [productId], references: [id])
+
+  type               String
+  quantity           Decimal  @db.Decimal(14, 3)
+  stockBefore        Decimal  @db.Decimal(14, 3)
+  stockAfter         Decimal  @db.Decimal(14, 3)
+  unitCost           Decimal? @db.Decimal(14, 2)
+
+  reason             String?
+  referenceNo        String?
+  notes              String?
+  movementDate       DateTime @default(now())
+
+  supplierId         String?
+  supplier           Supplier? @relation(fields: [supplierId], references: [id])
+
+  userId             String
+  user               User      @relation(fields: [userId], references: [id])
+
+  reversedMovementId String?
+  isReversed         Boolean   @default(false)
+
+  createdAt          DateTime  @default(now())
+
+  @@index([productId, createdAt])
+  @@index([type, createdAt])
+  @@index([userId])
+  @@index([movementDate])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  type        String
+  title       String
+  message     String
+  severity    String   @default("WARNING")
+  isRead      Boolean  @default(false)
+  stateKey    String?
+
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id])
+
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([isRead, createdAt])
+  @@index([productId])
+  @@index([stateKey])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String
+  entityType  String
+  entityId    String?
+  summary     String
+  metadata    String?
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  id                   String   @id @default("default")
+  companyName          String   @default("DEPO Stok ve Antrepo Yönetimi")
+  currency             String   @default("TRY")
+  currencySymbol       String   @default("₺")
+  timezone             String   @default("Europe/Istanbul")
+  lowStockAlertEnabled Boolean  @default(true)
+  customUnits          String   @default("Adet,Kutu,Paket,Kg,Gram,Litre,Metre,Koli,Palet")
+  defaultLocation      String   @default("ANA-DEPO")
+  valuationMethod      String   @default("STANDARD_COST")
+  updatedAt            DateTime @updatedAt
+}
