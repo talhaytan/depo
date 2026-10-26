@@ -7,11 +7,15 @@ const __dirname = path.dirname(__filename);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  serverExternalPackages: ["@prisma/client", "prisma"],
   outputFileTracingIncludes: {
-    "/**": ["./prisma/dev.db", "./prisma/av_fisekleri_depo.json"],
+    "/**": [
+      "./prisma/dev.db",
+      "./node_modules/.prisma/client/**/*",
+      "./node_modules/@prisma/client/**/*",
+    ],
   },
   typescript: {
-    // Type-checking is enforced by `tsc --noEmit`
     ignoreBuildErrors: true,
   },
   eslint: {

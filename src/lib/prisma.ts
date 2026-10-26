@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import path from "path";
+import { EMBEDDED_DB_BASE64 } from "./embedded-db";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -15,28 +16,33 @@ function resolveDatabaseUrl(): string {
     return process.env.DATABASE_URL;
   }
 
-  // On Vercel serverless environment, /var/task is read-only; copy bundled SQLite db to writable /tmp/dev.db
-  if (process.env.VERCEL) {
+  // On Vercel serverless environment, /var/task is read-only; materialize SQLite db into writable /tmp/dev.db
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     const tmpDbPath = "/tmp/dev.db";
-    if (!fs.existsSync(tmpDbPath)) {
-      const candidatePaths = [
-        path.join(process.cwd(), "prisma", "dev.db"),
-        path.join(process.cwd(), "dev.db"),
-      ];
-      for (const srcPath of candidatePaths) {
-        if (fs.existsSync(srcPath)) {
-          try {
-            fs.copyFileSync(srcPath, tmpDbPath);
-            break;
-          } catch {
-            // ignore copy error and fallback
+    const needsInit =
+      !fs.existsSync(tmpDbPath) || fs.statSync(tmpDbPath).size < 16384;
+
+    if (needsInit) {
+      try {
+        fs.writeFileSync(tmpDbPath, Buffer.from(EMBEDDED_DB_BASE64, "base64"));
+      } catch {
+        const candidatePaths = [
+          path.join(process.cwd(), "prisma", "dev.db"),
+          path.join(process.cwd(), "dev.db"),
+        ];
+        for (const srcPath of candidatePaths) {
+          if (fs.existsSync(srcPath)) {
+            try {
+              fs.copyFileSync(srcPath, tmpDbPath);
+              break;
+            } catch {
+              // ignore
+            }
           }
         }
       }
     }
-    if (fs.existsSync(tmpDbPath)) {
-      return `file:${tmpDbPath}`;
-    }
+    return `file:${tmpDbPath}`;
   }
 
   return process.env.DATABASE_URL || "file:./dev.db";
